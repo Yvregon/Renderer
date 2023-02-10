@@ -51,12 +51,14 @@ double Vector3f::getNorm(){
     return norm;
 }
 
-void Vector3f::normalize(){
+Vector3f Vector3f::normalize(){
     x /= norm;
     y /= norm;
     z /= norm;
 
     computeNorm();
+
+    return *this;
 }
 
 Vector3f Vector3f::operator+(Vector3f v){

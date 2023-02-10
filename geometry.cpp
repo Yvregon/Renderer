@@ -166,3 +166,22 @@ float scalar(Vector3f u, Vector3f v){
     return v.getX() * u.getX() + v.getY() * u.getY() + v.getZ() * u.getZ();
  //   return u.getNorm() * v.getNorm() * std::cos( (v.getX() * u.getX() + v.getY() * u.getY()) / (u.getNorm() + v.getNorm()) );
 }
+
+mat<4,4> model_view(Vector3f eye, Vector3f center, Vector3f up){
+
+    Vector3f z = (center-eye).normalize();
+    Vector3f x = cross(up,z).normalize();
+    Vector3f y = cross(z,x).normalize();
+    mat<4,4> Minv = {{{x.getX(), x.getY(), x.getZ(),0},   {y.getX(), y.getY(), y.getZ(),0},   {z.getX(), z.getY(), z.getZ(),0},   {0,0,0,1}}};
+    mat<4,4> Tr   = {{{1,0,0,-eye.getX()}, {0,1,0,-eye.getY()}, {0,0,1,-eye.getZ()}, {0,0,0,1}}};
+
+    return Minv*Tr;
+}
+
+mat<4,4> viewport(int x, int y, int w, int h) {
+    return {{{w, 0, 0, x+w/2.}, {0, h, 0, y+h/2.}, {0,0,1,0}, {0,0,0,1}}};
+}
+
+mat<4,4> projection(const double f) {
+    return {{{1,0,0,0}, {0,1,0,0}, {0,0,1,0}, {0,0,-1/f,1}}};
+}

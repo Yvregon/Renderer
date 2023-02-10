@@ -2,6 +2,7 @@
 #include <math.h>
 #include <vector>
 #include "Vector3f.h"
+#include "geometry_wiki.h"
 
 double square_area(triangle_t triangle);
 
@@ -28,3 +29,9 @@ Vector3f cross(Vector3f u, Vector3f v);
 Vector3f vertex_normal(Vector3f v, Vector3f a, Vector3f b);
 
 float scalar(Vector3f u, Vector3f v);
+
+mat<4,4> model_view(Vector3f eye, Vector3f center, Vector3f up);
+
+mat<4,4> viewport(int x, int y, int w, int h);
+
+mat<4, 4> projection(const double f);

@@ -32,7 +32,7 @@ class Vector3f{
 
         double getNorm();
 
-        void normalize();
+        Vector3f normalize();
 
         Vector3f operator+(Vector3f v);
 
