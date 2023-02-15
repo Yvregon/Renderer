@@ -6,11 +6,15 @@ mat<4,4> ModelView;
 mat<4,4> Viewport;
 mat<4,4> Projection;
     
-Vector3f light_dir = Vector3f(0, 0, 1);
-Vector3f camera = Vector3f(1, 1, 3);
+Vector3f light_dir = Vector3f(1, 1, 1);
+Vector3f camera = Vector3f(0, 0, 1);
+Vector3f center = Vector3f(0, 0, 0.);
+Vector3f up = Vector3f(0., 1., 0.);
 
 constexpr int width = 1024;
 constexpr int height = 1024;
+
+std::vector<std::vector<float>> shadow_buffer(width, std::vector<float>(height));
 
 triangle_t y_sort(triangle_t triangle){
     if (triangle.first.y < triangle.second.y) std::swap(triangle.first.y, triangle.second.y);
@@ -95,11 +99,15 @@ std::vector<std::vector<float>> fill_triangle(triangle_t triangle, std::vector<s
     return z_buffer;
 }
 
-std::vector<std::vector<float>> fill_triangle(triangle_t triangle, triangle_t normal, triangle_t texture, std::vector<std::vector<float>> z_buffer, TGAImage &textureImg, TGAImage &texture_nm, TGAImage &image){
+std::vector<std::vector<float>> fill_triangle(triangle_t triangle, triangle_t sh_triangle, triangle_t normal, triangle_t texture, std::vector<std::vector<float>> z_buffer, TGAImage &textureImg, TGAImage &texture_nm, TGAImage &texture_glow, TGAImage &image){
 
     Vector3f A = Vector3f(triangle.first);
     Vector3f B = Vector3f(triangle.second);
     Vector3f C = Vector3f(triangle.third);
+    
+    Vector3f As = Vector3f(sh_triangle.first);
+    Vector3f Bs = Vector3f(sh_triangle.second);
+    Vector3f Cs = Vector3f(sh_triangle.third);
 
     //Flat shading
     Vector3f surface_vec = getSurfaceNormal(triangle);
@@ -118,10 +126,12 @@ std::vector<std::vector<float>> fill_triangle(triangle_t triangle, triangle_t no
 
                 point_t to_color = {(float) x, (float) y, 0.f};
                 Vector3f bary = get_barycentric_vector(triangle, to_color);
+                Vector3f bary_shadow = get_barycentric_vector(sh_triangle, to_color);
 
                 float z_index = bary.getX() * A.getZ() + bary.getY() * B.getZ() + bary.getZ() * C.getZ();
                 float x_index = bary.getX() * texture.first.x + bary.getY() * texture.second.x + bary.getZ() * texture.third.x;
                 float y_index = bary.getX() * texture.first.y + bary.getY() * texture.second.y + bary.getZ() * texture.third.y;
+                float s_index = bary_shadow.getX() * As.getZ() + bary_shadow.getY() * Bs.getZ() + bary_shadow.getZ() * Cs.getZ();
 
                 TGAColor nm_pix = texture_nm.get(x_index, y_index);
                 Vector3f text_norm = Vector3f(nm_pix.bgra[2]*2./255.-1., nm_pix.bgra[1]*2./255.-1., nm_pix.bgra[0]*2./255.-1.);
@@ -145,13 +155,26 @@ std::vector<std::vector<float>> fill_triangle(triangle_t triangle, triangle_t no
                     if(z_buffer[x][y] < z_index && is_into_triangle(triangle, to_color)){
 
                         z_buffer[x][y] = z_index;
+                        
+                        if(shadow_buffer[x][y] < s_index){
+                            shadow_buffer[x][y] = s_index;
+                        }
+
+                        float shadow = .3+.7*(shadow_buffer[x][y] < s_index+43.34);
 
                         TGAColor color = textureImg.get(x_index, y_index);
-                        color = {255, 255, 255, 255};
+                        TGAColor glow = texture_glow.get(x_index, y_index);
+                        //std::cout << (int)glow.bgra[2] << "_" << (int)glow.bgra[1] << "_" << (int)glow.bgra[0] << "_" << (int)glow.bgra[3] << std::endl;
+                        
                         float red = std::min(intensity*color.bgra[2], 255.f);
                         float green = std::min(intensity*color.bgra[1], 255.f);
                         float blue = std::min(intensity*color.bgra[0], 255.f);
-                        image.set(x, y, TGAColor(red, green, blue, 255));  
+
+                        if(glow.bgra[2] == 0){
+                            image.set(x, y, TGAColor(red*shadow, green*shadow, blue*shadow, 255));
+                        }else{  
+                            image.set(x, y, TGAColor(std::min((red+glow.bgra[2])*glow.bgra[2], 255.f), std::min((green+glow.bgra[1])*glow.bgra[1], 255.f), std::min((blue+glow.bgra[0])*glow.bgra[0], 255.f), 255));  
+                        }
                     }
                 }
             }
@@ -201,7 +224,7 @@ void draw(std::vector<triangle_t> triangles, TGAColor color, TGAImage &image){
 	}
 }
 
-void draw(std::vector<triangle_t> triangles, std::vector<triangle_t> normals, std::vector<triangle_t> textures, TGAImage &textureImg, TGAImage &texture_nm, TGAImage &image){
+void draw(std::vector<triangle_t> triangles, std::vector<triangle_t> normals, std::vector<triangle_t> textures, TGAImage &textureImg, TGAImage &texture_nm, TGAImage &texture_glow,TGAImage &image){
 
     //Z-buffer init
     std::vector<std::vector<float>> z_buffer(width, std::vector<float>(height));
@@ -209,20 +232,27 @@ void draw(std::vector<triangle_t> triangles, std::vector<triangle_t> normals, st
     for(int i = 0; i < width; i++){
         for(int j = 0; j < height; j++){
             z_buffer[i][j] = -std::numeric_limits<float>::max();
+            shadow_buffer[i][j] = -std::numeric_limits<float>::max();
         }
     }
 
     for(int i = 0; i < triangles.size(); i++){
         triangle_t triangle = triangles[i];
+        triangle_t sh_triangle = triangles[i];
         for (int v : {0,1,2}) {
+            //Vertex
             mat<4,1> p = Viewport * Projection * ModelView * mat<4,1>{{{triangle[v].x},{triangle[v].y},{triangle[v].z},{1.}}};
             triangle[v] = {p[0][0]/p[3][0], p[1][0]/p[3][0], p[2][0]/p[3][0]};
+
+            //Shadows
+            mat<4,1> s = Viewport * projection(light_dir.getZ()) * model_view(light_dir, center, up) * mat<4,1>{{{triangle[v].x},{triangle[v].y},{triangle[v].z},{1.}}};
+            sh_triangle[v] = {s[0][0]/s[3][0], s[1][0]/s[3][0], s[2][0]/s[3][0]};
         }
 
         triangle_t texture = textures[i];
         triangle_t normal = normals[i];
 
-		z_buffer = fill_triangle(triangle, normal, texture, z_buffer, textureImg, texture_nm, image);
+		z_buffer = fill_triangle(triangle, sh_triangle, normal, texture, z_buffer, textureImg, texture_nm, texture_glow, image);
 	}
 }
 
@@ -232,10 +262,6 @@ int main(int argc, char** argv){
     const TGAColor green = {0, 255, 0, 255};
     const TGAColor red = {255, 0, 0, 255};
 
-    camera = Vector3f(0, 0, 1);
-    Vector3f center = Vector3f(0, 0, 0.);
-    Vector3f up = Vector3f(0., 1., 0.);
-    light_dir = Vector3f(1, 1, 1);
     light_dir.normalize();
 
     ModelView = model_view(camera, center, up);
@@ -250,11 +276,15 @@ int main(int argc, char** argv){
     TGAImage texture_nm;
     texture_nm.read_tga_file("objs/diablo3_pose_nm.tga");
     texture_nm.flip_vertically();
+
+    TGAImage texture_glow;
+    texture_glow.read_tga_file("objs/diablo3_pose_glow.tga");
+    texture_glow.flip_vertically();
     
     Obj obj = Obj("objs/diablo3_pose.obj");
     obj.parseObject();
 
-    draw(obj.getFaces(), obj.getNormals() ,obj.getTextures(), texture, texture_nm, framebuffer);
+    draw(obj.getFaces(), obj.getNormals() ,obj.getTextures(), texture, texture_nm, texture_glow, framebuffer);
 
     framebuffer.write_tga_file("render/diablo.tga");
 
