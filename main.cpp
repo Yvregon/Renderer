@@ -7,14 +7,40 @@ mat<4,4> Viewport;
 mat<4,4> Projection;
     
 Vector3f light_dir = Vector3f(1, 1, 1);
-Vector3f camera = Vector3f(0, 0, 1);
-Vector3f center = Vector3f(0, 0, 0.);
+Vector3f camera = Vector3f(1, 1, 3);
+Vector3f center = Vector3f(0, 0, 0);
 Vector3f up = Vector3f(0., 1., 0.);
 
 constexpr int width = 1024;
 constexpr int height = 1024;
 
 std::vector<std::vector<float>> shadow_buffer(width, std::vector<float>(height));
+
+TGAColor blur(TGAImage &image, int x, int y){
+
+    int d = 1;
+    int div = (2*d+1)*(2*d+1)-1;
+
+    int red = 0;
+    int green = 0;
+    int blue = 0;
+
+    for(int i = x-d; i < x+d; i++){
+        for(int j = y-d; j < y+d; j++){
+            TGAColor color = image.get(i, j);
+            red += color.bgra[2];
+            green += color.bgra[1];
+            blue += color.bgra[0];
+        }
+    }
+
+    TGAColor color = image.get(x, y);
+    red -= color.bgra[2];
+    green -= color.bgra[1];
+    blue -= color.bgra[0];
+
+    return TGAColor((int)(red/div), (int)(green/div), (int)(blue/div));
+}
 
 triangle_t y_sort(triangle_t triangle){
     if (triangle.first.y < triangle.second.y) std::swap(triangle.first.y, triangle.second.y);
@@ -136,6 +162,8 @@ std::vector<std::vector<float>> fill_triangle(triangle_t triangle, triangle_t sh
                 TGAColor nm_pix = texture_nm.get(x_index, y_index);
                 Vector3f text_norm = Vector3f(nm_pix.bgra[2]*2./255.-1., nm_pix.bgra[1]*2./255.-1., nm_pix.bgra[0]*2./255.-1.);
 
+                //std::cout << text_norm.getX() << " " << text_norm.getY() << " " << text_norm.getZ() << std::endl;
+
                 float nx = text_norm.getX();
                 float ny = text_norm.getY();
                 float nz = text_norm.getZ();
@@ -144,26 +172,31 @@ std::vector<std::vector<float>> fill_triangle(triangle_t triangle, triangle_t sh
                 auto n = Vector3f(nx, ny, nz);
                 n.normalize();
 
-                float diffuse = std::max(0.f, scalar(n, light_dir));
+                float diffuse = std::max(0.f, scalar(n, light_dir))*1.5f;
                 Vector3f r = (n*2.*scalar(n, light_dir) - light_dir).normalize();
-                float specular = pow(std::max(-r.getZ(), 0.0f), 10.);
+                float specular = pow(std::max(-r.getZ(), 0.0f), 10.)*1.5f;
                 float intensity = diffuse + specular;
-         //       std::cerr<<intensity<< std::endl;
 
-                if(x>=0 && x < 1024 && y>=0 && y < 1024){
+                if(x>=0 && x < width && y>=0 && y < height){
 
                     if(z_buffer[x][y] < z_index && is_into_triangle(triangle, to_color)){
 
-                        z_buffer[x][y] = z_index;
+                        if(z_buffer[x][y] < z_index){
+                            z_buffer[x][y] = z_index;
+                        }
                         
                         if(shadow_buffer[x][y] < s_index){
                             shadow_buffer[x][y] = s_index;
                         }
 
                         float shadow = .3+.7*(shadow_buffer[x][y] < s_index+43.34);
+                        shadow = 1;
 
                         TGAColor color = textureImg.get(x_index, y_index);
+                        //color = {255,255,255,255};
                         TGAColor glow = texture_glow.get(x_index, y_index);
+                        //glow = {0,0,0,0};
+
                         //std::cout << (int)glow.bgra[2] << "_" << (int)glow.bgra[1] << "_" << (int)glow.bgra[0] << "_" << (int)glow.bgra[3] << std::endl;
                         
                         float red = std::min(intensity*color.bgra[2], 255.f);
@@ -172,9 +205,17 @@ std::vector<std::vector<float>> fill_triangle(triangle_t triangle, triangle_t sh
 
                         if(glow.bgra[2] == 0){
                             image.set(x, y, TGAColor(red*shadow, green*shadow, blue*shadow, 255));
-                        }else{  
-                            image.set(x, y, TGAColor(std::min((red+glow.bgra[2])*glow.bgra[2], 255.f), std::min((green+glow.bgra[1])*glow.bgra[1], 255.f), std::min((blue+glow.bgra[0])*glow.bgra[0], 255.f), 255));  
+                        }else{
+
+                            TGAColor blur_color = blur(texture_glow, x_index, y_index);
+                            float glow_red = red+glow.bgra[2]+blur_color.bgra[2]*5;
+                            float glow_green = green+glow.bgra[1]+blur_color.bgra[1]*5;
+                            float glow_blue = blue+glow.bgra[0]+blur_color.bgra[0]*5;
+
+                            image.set(x, y, TGAColor(std::min(glow_red, 255.f), std::min(glow_green, 255.f), std::min(glow_blue, 255.f), 255));  
                         }
+
+                        //image.set(x, y, TGAColor(red*shadow, green*shadow, blue*shadow, 255));
                     }
                 }
             }
@@ -245,13 +286,25 @@ void draw(std::vector<triangle_t> triangles, std::vector<triangle_t> normals, st
             triangle[v] = {p[0][0]/p[3][0], p[1][0]/p[3][0], p[2][0]/p[3][0]};
 
             //Shadows
-            mat<4,1> s = Viewport * projection(light_dir.getZ()) * model_view(light_dir, center, up) * mat<4,1>{{{triangle[v].x},{triangle[v].y},{triangle[v].z},{1.}}};
+            mat<4,1> s = Viewport * projection((light_dir-center).getNorm()) * model_view(light_dir, center, up) * mat<4,1>{{{triangle[v].x},{triangle[v].y},{triangle[v].z},{1.}}};
             sh_triangle[v] = {s[0][0]/s[3][0], s[1][0]/s[3][0], s[2][0]/s[3][0]};
         }
+
+        /*std::cout << "Triangle :" <<std::endl;
+        std::cout << "[(" << triangle.first.x << ", " << triangle.first.y << ", " << triangle.first.z << ")," << std::endl;
+        std::cout << "(" << triangle.second.x << ", " << triangle.second.y << ", " << triangle.second.z << ")," << std::endl;
+        std::cout << "(" << triangle.third.x << ", " << triangle.third.y << ", " << triangle.third.z << ")]" << std::endl << std::endl;
+
+        std::cout << "Shadow :" <<std::endl;
+        std::cout << "[(" << sh_triangle.first.x << ", " << sh_triangle.first.y << ", " << sh_triangle.first.z << ")," << std::endl;
+        std::cout << "(" << sh_triangle.second.x << ", " << sh_triangle.second.y << ", " << sh_triangle.second.z << ")," << std::endl;
+        std::cout << "(" << sh_triangle.third.x << ", " << sh_triangle.third.y << ", " << sh_triangle.third.z << ")]" << std::endl << std::endl;
+        std::cout << "--------------------------------------" <<std::endl;*/
 
         triangle_t texture = textures[i];
         triangle_t normal = normals[i];
 
+        //#pragma omp parallel for
 		z_buffer = fill_triangle(triangle, sh_triangle, normal, texture, z_buffer, textureImg, texture_nm, texture_glow, image);
 	}
 }
@@ -263,6 +316,7 @@ int main(int argc, char** argv){
     const TGAColor red = {255, 0, 0, 255};
 
     light_dir.normalize();
+    camera.normalize();
 
     ModelView = model_view(camera, center, up);
     Viewport = viewport(width/8, height/8, width*3/4, height*3/4);
