@@ -18,7 +18,7 @@ std::vector<std::vector<float>> shadow_buffer(width, std::vector<float>(height))
 
 TGAColor blur(TGAImage &image, int x, int y){
 
-    int d = 1;
+    int d = 3;
     int div = (2*d+1)*(2*d+1)-1;
 
     int red = 0;
@@ -162,8 +162,6 @@ std::vector<std::vector<float>> fill_triangle(triangle_t triangle, triangle_t sh
                 TGAColor nm_pix = texture_nm.get(x_index, y_index);
                 Vector3f text_norm = Vector3f(nm_pix.bgra[2]*2./255.-1., nm_pix.bgra[1]*2./255.-1., nm_pix.bgra[0]*2./255.-1.);
 
-                //std::cout << text_norm.getX() << " " << text_norm.getY() << " " << text_norm.getZ() << std::endl;
-
                 float nx = text_norm.getX();
                 float ny = text_norm.getY();
                 float nz = text_norm.getZ();
@@ -223,6 +221,15 @@ std::vector<std::vector<float>> fill_triangle(triangle_t triangle, triangle_t sh
     }
 
     return z_buffer;
+}
+
+void draw_background(TGAImage &image){
+    for(int j = 0; j < height; j++){
+        for(int i = 0; i < width; i++){
+            int grey = 16;
+            image.set(j, i, TGAColor(grey, grey, grey, 0));
+        }
+    }
 }
 
 void line(point_t one, point_t two, TGAColor color, TGAImage &image){
@@ -290,21 +297,10 @@ void draw(std::vector<triangle_t> triangles, std::vector<triangle_t> normals, st
             sh_triangle[v] = {s[0][0]/s[3][0], s[1][0]/s[3][0], s[2][0]/s[3][0]};
         }
 
-        /*std::cout << "Triangle :" <<std::endl;
-        std::cout << "[(" << triangle.first.x << ", " << triangle.first.y << ", " << triangle.first.z << ")," << std::endl;
-        std::cout << "(" << triangle.second.x << ", " << triangle.second.y << ", " << triangle.second.z << ")," << std::endl;
-        std::cout << "(" << triangle.third.x << ", " << triangle.third.y << ", " << triangle.third.z << ")]" << std::endl << std::endl;
-
-        std::cout << "Shadow :" <<std::endl;
-        std::cout << "[(" << sh_triangle.first.x << ", " << sh_triangle.first.y << ", " << sh_triangle.first.z << ")," << std::endl;
-        std::cout << "(" << sh_triangle.second.x << ", " << sh_triangle.second.y << ", " << sh_triangle.second.z << ")," << std::endl;
-        std::cout << "(" << sh_triangle.third.x << ", " << sh_triangle.third.y << ", " << sh_triangle.third.z << ")]" << std::endl << std::endl;
-        std::cout << "--------------------------------------" <<std::endl;*/
-
         triangle_t texture = textures[i];
         triangle_t normal = normals[i];
 
-        //#pragma omp parallel for
+        #pragma omp parallel for
 		z_buffer = fill_triangle(triangle, sh_triangle, normal, texture, z_buffer, textureImg, texture_nm, texture_glow, image);
 	}
 }
